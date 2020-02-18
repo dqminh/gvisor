@@ -50,7 +50,16 @@ func pivotRoot(root string) error {
 	// new_root, so after umounting the old_root, we will see only
 	// the new_root in "/".
 	if err := syscall.PivotRoot(".", "."); err != nil {
-		return fmt.Errorf("pivot_root failed, make sure that the root mount has a parent: %v", err)
+		// Fall back to chroot on pivot_root failure. This
+		// might happen when we are running off rootfs
+		// filesystem - which doesn't work with
+		// pivot_root. This code is buggy, doing chroot is a
+		// bad idea, see docker:
+		// https://github.com/opencontainers/runc/commit/28a697cce3e4f905dca700eda81d681a30eef9cd
+		if err2 := syscall.Chroot("."); err2 != nil {
+			return fmt.Errorf("error changing root filesystem: %v", err)
+		}
+		return nil
 	}
 
 	if err := syscall.Unmount(".", syscall.MNT_DETACH); err != nil {
