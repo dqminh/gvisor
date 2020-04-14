@@ -38,30 +38,40 @@ var remoteIPv4 = flag.String("remote_ipv4", "", "remote IPv4 address for test pa
 var localMAC = flag.String("local_mac", "", "local mac address for test packets")
 var remoteMAC = flag.String("remote_mac", "", "remote mac address for test packets")
 
-// pickPort makes a new socket and returns the socket FD and port. The caller
-// must close the FD when done with the port if there is no error.
-func pickPort() (int, uint16, error) {
+func portFromSockaddr(sa unix.Sockaddr) (uint16, error) {
+	switch sa := sa.(type) {
+	case *unix.SockaddrInet4:
+		return uint16(sa.Port), nil
+	case *unix.SockaddrInet6:
+		return uint16(sa.Port), nil
+	}
+	return 0, fmt.Errorf("sockaddr type %T does not contain port", sa)
+}
+
+// pickPort makes a new socket and returns the socket FD, address and port. The
+// caller must close the FD when done with the port if there is no error.
+func pickPort() (int, unix.Sockaddr, error) {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM, 0)
 	if err != nil {
-		return -1, 0, err
+		return -1, nil, err
 	}
 	var sa unix.SockaddrInet4
 	copy(sa.Addr[0:4], net.ParseIP(*localIPv4).To4())
 	if err := unix.Bind(fd, &sa); err != nil {
 		unix.Close(fd)
-		return -1, 0, err
+		return -1, nil, err
 	}
 	newSockAddr, err := unix.Getsockname(fd)
 	if err != nil {
 		unix.Close(fd)
-		return -1, 0, err
+		return -1, nil, err
 	}
 	newSockAddrInet4, ok := newSockAddr.(*unix.SockaddrInet4)
 	if !ok {
 		unix.Close(fd)
-		return -1, 0, fmt.Errorf("can't cast Getsockname result to SockaddrInet4")
+		return -1, nil, fmt.Errorf("can't cast Getsockname result to SockaddrInet4")
 	}
-	return fd, uint16(newSockAddrInet4.Port), nil
+	return fd, newSockAddrInet4, nil
 }
 
 // layerState stores the state of a layer of a connection.
@@ -203,7 +213,11 @@ func SeqNumValue(v seqnum.Value) *seqnum.Value {
 
 // newTCPState creates a new TCPState.
 func newTCPState(out, in TCP) (*tcpState, error) {
-	portPickerFD, localPort, err := pickPort()
+	portPickerFD, localAddr, err := pickPort()
+	if err != nil {
+		return nil, err
+	}
+	localPort, err := portFromSockaddr(localAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -305,10 +319,14 @@ type udpState struct {
 var _ layerState = (*udpState)(nil)
 
 // newUDPState creates a new udpState.
-func newUDPState(out, in UDP) (*udpState, error) {
-	portPickerFD, localPort, err := pickPort()
+func newUDPState(out, in UDP) (*udpState, unix.Sockaddr, error) {
+	portPickerFD, localAddr, err := pickPort()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	localPort, err := portFromSockaddr(localAddr)
+	if err != nil {
+		return nil, nil, err
 	}
 	s := udpState{
 		out:          UDP{SrcPort: &localPort},
@@ -316,12 +334,12 @@ func newUDPState(out, in UDP) (*udpState, error) {
 		portPickerFD: portPickerFD,
 	}
 	if err := s.out.merge(&out); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := s.in.merge(&in); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &s, nil
+	return &s, localAddr, nil
 }
 
 func (s *udpState) outgoing() Layer {
@@ -355,6 +373,7 @@ type Connection struct {
 	layerStates []layerState
 	injector    Injector
 	sniffer     Sniffer
+	localAddr   unix.Sockaddr
 	t           *testing.T
 }
 
@@ -412,7 +431,7 @@ func (conn *Connection) CreateFrame(layer Layer, additionalLayers ...Layer) Laye
 func (conn *Connection) SendFrame(frame Layers) {
 	outBytes, err := frame.toBytes()
 	if err != nil {
-		conn.t.Fatalf("can't build outgoing TCP packet: %s", err)
+		conn.t.Fatalf("can't build outgoing packet: %s", err)
 	}
 	conn.injector.Send(outBytes)
 
@@ -626,7 +645,7 @@ func NewUDPIPv4(t *testing.T, outgoingUDP, incomingUDP UDP) UDPIPv4 {
 	if err != nil {
 		t.Fatalf("can't make ipv4State: %s", err)
 	}
-	tcpState, err := newUDPState(outgoingUDP, incomingUDP)
+	udpState, localAddr, err := newUDPState(outgoingUDP, incomingUDP)
 	if err != nil {
 		t.Fatalf("can't make udpState: %s", err)
 	}
@@ -640,11 +659,17 @@ func NewUDPIPv4(t *testing.T, outgoingUDP, incomingUDP UDP) UDPIPv4 {
 	}
 
 	return UDPIPv4{
-		layerStates: []layerState{etherState, ipv4State, tcpState},
+		layerStates: []layerState{etherState, ipv4State, udpState},
 		injector:    injector,
 		sniffer:     sniffer,
+		localAddr:   localAddr,
 		t:           t,
 	}
+}
+
+// LocalAddr gets the local socket address of this connection.
+func (conn *UDPIPv4) LocalAddr() unix.Sockaddr {
+	return conn.localAddr
 }
 
 // CreateFrame builds a frame for the connection with layer overriding defaults
@@ -653,9 +678,40 @@ func (conn *UDPIPv4) CreateFrame(layer Layer, additionalLayers ...Layer) Layers 
 	return (*Connection)(conn).CreateFrame(layer, additionalLayers...)
 }
 
+// Send a packet with reasonable defaults. Potentially override the UDP layer in
+// the connection with the provided layer and add additionLayers.
+func (conn *UDPIPv4) Send(udp UDP, additionalLayers ...Layer) {
+	(*Connection)(conn).Send(&udp, additionalLayers...)
+}
+
 // SendFrame sends a frame on the wire and updates the state of all layers.
 func (conn *UDPIPv4) SendFrame(frame Layers) {
 	(*Connection)(conn).SendFrame(frame)
+}
+
+// SendIP sends a packet with additionalLayers following the IP layer in the
+// connection.
+func (conn *UDPIPv4) SendIP(additionalLayers ...Layer) {
+	var layersToSend Layers
+	for _, s := range conn.layerStates[:len(conn.layerStates)-1] {
+		layersToSend = append(layersToSend, s.outgoing())
+	}
+	layersToSend = append(layersToSend, additionalLayers...)
+	conn.SendFrame(layersToSend)
+}
+
+// Expect a frame with the UDP layer matching the provided UDP within the
+// timeout specified. If it doesn't arrive in time, it returns nil.
+func (conn *UDPIPv4) Expect(udp UDP, timeout time.Duration) (*UDP, error) {
+	layer, err := (*Connection)(conn).Expect(&udp, timeout)
+	if layer == nil {
+		return nil, err
+	}
+	gotUDP, ok := layer.(*UDP)
+	if !ok {
+		conn.t.Fatalf("expected %s to be UDP", layer)
+	}
+	return gotUDP, err
 }
 
 // Close frees associated resources held by the UDPIPv4 connection.
