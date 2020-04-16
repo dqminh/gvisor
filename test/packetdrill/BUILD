@@ -17,16 +17,6 @@ packetdrill_test(
     scripts = ["fin_wait2_timeout.pkt"],
 )
 
-packetdrill_linux_test(
-    name = "tcp_user_timeout_test_linux_test",
-    scripts = ["linux/tcp_user_timeout.pkt"],
-)
-
-packetdrill_netstack_test(
-    name = "tcp_user_timeout_test_netstack_test",
-    scripts = ["netstack/tcp_user_timeout.pkt"],
-)
-
 packetdrill_test(
     name = "listen_close_before_handshake_complete_test",
     scripts = ["listen_close_before_handshake_complete.pkt"],
