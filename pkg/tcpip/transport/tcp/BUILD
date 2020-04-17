@@ -105,7 +105,7 @@ go_test(
         "//pkg/tcpip/seqnum",
         "//pkg/tcpip/stack",
         "//pkg/tcpip/transport/tcp/testing/context",
+        "//pkg/test/testutil",
         "//pkg/waiter",
-        "//runsc/testutil",
     ],
 )

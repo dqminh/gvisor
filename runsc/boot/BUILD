@@ -24,6 +24,7 @@ go_library(
         "vfs.go",
     ],
     visibility = [
+        "//pkg/test:__subpackages__",
         "//runsc:__subpackages__",
         "//test:__subpackages__",
     ],

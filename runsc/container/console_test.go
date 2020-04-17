@@ -29,9 +29,9 @@ import (
 	"gvisor.dev/gvisor/pkg/sentry/control"
 	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sync"
+	"gvisor.dev/gvisor/pkg/test/testutil"
 	"gvisor.dev/gvisor/pkg/unet"
 	"gvisor.dev/gvisor/pkg/urpc"
-	"gvisor.dev/gvisor/runsc/testutil"
 )
 
 // socketPath creates a path inside bundleDir and ensures that the returned
@@ -58,25 +58,26 @@ func socketPath(bundleDir string) (string, error) {
 }
 
 // createConsoleSocket creates a socket at the given path that will receive a
-// console fd from the sandbox. If no error occurs, it returns the server
-// socket and a cleanup function.
-func createConsoleSocket(path string) (*unet.ServerSocket, func() error, error) {
+// console fd from the sandbox. If an error occurs, t.Fatalf will be called.
+// The function returning should be deferred as cleanup.
+func createConsoleSocket(t *testing.T, path string) (*unet.ServerSocket, func()) {
+	t.Helper()
 	srv, err := unet.BindAndListen(path, false)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error binding and listening to socket %q: %v", path, err)
+		t.Fatalf("error binding and listening to socket %q: %v", path, err)
 	}
 
-	cleanup := func() error {
+	cleanup := func() {
+		// Log errors; nothing can be done.
 		if err := srv.Close(); err != nil {
-			return fmt.Errorf("error closing socket %q: %v", path, err)
+			t.Logf("error closing socket %q: %v", path, err)
 		}
 		if err := os.Remove(path); err != nil {
-			return fmt.Errorf("error removing socket %q: %v", path, err)
+			t.Logf("error removing socket %q: %v", path, err)
 		}
-		return nil
 	}
 
-	return srv, cleanup, nil
+	return srv, cleanup
 }
 
 // receiveConsolePTY accepts a connection on the server socket and reads fds.
@@ -121,21 +122,17 @@ func TestConsoleSocket(t *testing.T) {
 	for _, conf := range configs(t, all...) {
 		t.Logf("Running test with conf: %+v", conf)
 		spec := testutil.NewSpecWithArgs("true")
-		rootDir, bundleDir, err := testutil.SetupContainer(spec, conf)
+		_, bundleDir, cleanup, err := testutil.SetupContainer(spec, conf)
 		if err != nil {
 			t.Fatalf("error setting up container: %v", err)
 		}
-		defer os.RemoveAll(rootDir)
-		defer os.RemoveAll(bundleDir)
+		defer cleanup()
 
 		sock, err := socketPath(bundleDir)
 		if err != nil {
 			t.Fatalf("error getting socket path: %v", err)
 		}
-		srv, cleanup, err := createConsoleSocket(sock)
-		if err != nil {
-			t.Fatalf("error creating socket at %q: %v", sock, err)
-		}
+		srv, cleanup := createConsoleSocket(t, sock)
 		defer cleanup()
 
 		// Create the container and pass the socket name.
@@ -165,12 +162,11 @@ func TestJobControlSignalExec(t *testing.T) {
 	spec := testutil.NewSpecWithArgs("/bin/sleep", "10000")
 	conf := testutil.TestConfig(t)
 
-	rootDir, bundleDir, err := testutil.SetupContainer(spec, conf)
+	_, bundleDir, cleanup, err := testutil.SetupContainer(spec, conf)
 	if err != nil {
 		t.Fatalf("error setting up container: %v", err)
 	}
-	defer os.RemoveAll(rootDir)
-	defer os.RemoveAll(bundleDir)
+	defer cleanup()
 
 	// Create and start the container.
 	args := Args{
@@ -292,21 +288,17 @@ func TestJobControlSignalRootContainer(t *testing.T) {
 	spec := testutil.NewSpecWithArgs("/bin/bash", "--noprofile", "--norc")
 	spec.Process.Terminal = true
 
-	rootDir, bundleDir, err := testutil.SetupContainer(spec, conf)
+	_, bundleDir, cleanup, err := testutil.SetupContainer(spec, conf)
 	if err != nil {
 		t.Fatalf("error setting up container: %v", err)
 	}
-	defer os.RemoveAll(rootDir)
-	defer os.RemoveAll(bundleDir)
+	defer cleanup()
 
 	sock, err := socketPath(bundleDir)
 	if err != nil {
 		t.Fatalf("error getting socket path: %v", err)
 	}
-	srv, cleanup, err := createConsoleSocket(sock)
-	if err != nil {
-		t.Fatalf("error creating socket at %q: %v", sock, err)
-	}
+	srv, cleanup := createConsoleSocket(t, sock)
 	defer cleanup()
 
 	// Create the container and pass the socket name.

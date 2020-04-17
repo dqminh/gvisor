@@ -24,8 +24,8 @@ import (
 
 	"gvisor.dev/gvisor/pkg/sentry/control"
 	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
+	"gvisor.dev/gvisor/pkg/test/testutil"
 	"gvisor.dev/gvisor/runsc/boot"
-	"gvisor.dev/gvisor/runsc/testutil"
 )
 
 // TestSharedVolume checks that modifications to a volume mount are propagated
@@ -44,12 +44,11 @@ func TestSharedVolume(t *testing.T) {
 		t.Fatalf("TempDir failed: %v", err)
 	}
 
-	rootDir, bundleDir, err := testutil.SetupContainer(spec, conf)
+	_, bundleDir, cleanup, err := testutil.SetupContainer(spec, conf)
 	if err != nil {
 		t.Fatalf("error setting up container: %v", err)
 	}
-	defer os.RemoveAll(rootDir)
-	defer os.RemoveAll(bundleDir)
+	defer cleanup()
 
 	// Create and start the container.
 	args := Args{
@@ -203,12 +202,11 @@ func TestSharedVolumeFile(t *testing.T) {
 		t.Fatalf("TempDir failed: %v", err)
 	}
 
-	rootDir, bundleDir, err := testutil.SetupContainer(spec, conf)
+	_, bundleDir, cleanup, err := testutil.SetupContainer(spec, conf)
 	if err != nil {
 		t.Fatalf("error setting up container: %v", err)
 	}
-	defer os.RemoveAll(rootDir)
-	defer os.RemoveAll(bundleDir)
+	defer cleanup()
 
 	// Create and start the container.
 	args := Args{
