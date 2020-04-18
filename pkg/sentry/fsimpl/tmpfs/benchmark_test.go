@@ -168,7 +168,7 @@ func BenchmarkVFS1TmpfsStat(b *testing.B) {
 	}
 }
 
-func BenchmarkVFS2MemfsStat(b *testing.B) {
+func BenchmarkVFS2TmpfsStat(b *testing.B) {
 	for _, depth := range depths {
 		b.Run(fmt.Sprintf("%d", depth), func(b *testing.B) {
 			ctx := contexttest.Context(b)
@@ -362,7 +362,7 @@ func BenchmarkVFS1TmpfsMountStat(b *testing.B) {
 	}
 }
 
-func BenchmarkVFS2MemfsMountStat(b *testing.B) {
+func BenchmarkVFS2TmpfsMountStat(b *testing.B) {
 	for _, depth := range depths {
 		b.Run(fmt.Sprintf("%d", depth), func(b *testing.B) {
 			ctx := contexttest.Context(b)
@@ -436,13 +436,6 @@ func BenchmarkVFS2MemfsMountStat(b *testing.B) {
 				vd = nextVD
 				filePathBuilder.WriteString(name)
 				filePathBuilder.WriteByte('/')
-			}
-
-			// Verify that we didn't create any directories under the mount
-			// point (i.e. they were all created on the submount).
-			firstDirName := fmt.Sprintf("%d", depth)
-			if child := mountPoint.Dentry().Child(firstDirName); child != nil {
-				b.Fatalf("created directory %q under root mount, not submount", firstDirName)
 			}
 
 			// Create the file that will be stat'd.
