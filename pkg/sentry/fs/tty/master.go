@@ -175,6 +175,12 @@ func (mf *masterFileOperations) Ioctl(ctx context.Context, _ *fs.File, io userme
 	case linux.TCSETSW:
 		// TODO(b/29356795): This should drain the output queue first.
 		return mf.t.ld.setTermios(t, args)
+	case linux.TCSETSF:
+		// https://github.com/google/gvisor/issues/2335
+		if _, err := mf.t.ld.discardPendingInput(ctx); err != nil {
+			return 0, err
+		}
+		return mf.t.ld.setTermios(t, args)
 	case linux.TIOCGPTN:
 		nP := primitive.Uint32(mf.t.n)
 		_, err := nP.CopyOut(t, args[2].Pointer())

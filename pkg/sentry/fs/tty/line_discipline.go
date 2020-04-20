@@ -196,6 +196,25 @@ func (l *lineDiscipline) inputQueueRead(ctx context.Context, dst usermem.IOSeque
 	return 0, syserror.ErrWouldBlock
 }
 
+func (l *lineDiscipline) discardPendingInput(ctx context.Context) (int64, error) {
+	l.termiosMu.RLock()
+	defer l.termiosMu.RUnlock()
+	var total int64 = 0
+	outBytes := make([]byte, 32)
+	for {
+		dst := usermem.BytesIOSequence(outBytes)
+		n, err := l.inputQueueRead(ctx, dst)
+		total += n
+		if err != nil {
+			if err == syserror.ErrWouldBlock {
+				return total, nil
+			}
+			return total, err
+		}
+	}
+	return total, nil
+}
+
 func (l *lineDiscipline) inputQueueWrite(ctx context.Context, src usermem.IOSequence) (int64, error) {
 	l.termiosMu.RLock()
 	defer l.termiosMu.RUnlock()

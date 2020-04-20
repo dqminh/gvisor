@@ -156,6 +156,12 @@ func (sf *replicaFileOperations) Ioctl(ctx context.Context, _ *fs.File, io userm
 	case linux.TCSETSW:
 		// TODO(b/29356795): This should drain the output queue first.
 		return sf.si.t.ld.setTermios(t, args)
+	case linux.TCSETSF:
+		// https://github.com/google/gvisor/issues/2335
+		if _, err := sf.si.t.ld.discardPendingInput(ctx); err != nil {
+			return 0, err
+		}
+		return sf.si.t.ld.setTermios(t, args)
 	case linux.TIOCGPTN:
 		nP := primitive.Uint32(sf.si.t.n)
 		_, err := nP.CopyOut(t, args[2].Pointer())
