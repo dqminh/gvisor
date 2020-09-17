@@ -293,6 +293,8 @@ func New(args Args) (*Loader, error) {
 		log.Infof("Setting total memory to %.2f GB", float64(args.TotalMem)/(1<<30))
 	}
 
+	runtime.GOMAXPROCS(args.NumCPU)
+
 	// Initiate the Kernel object, which is required by the Context passed
 	// to createVFS in order to mount (among other things) procfs.
 	if err = k.Init(kernel.InitKernelArgs{
