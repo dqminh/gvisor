@@ -1177,7 +1177,11 @@ func setOOMScoreAdj(pid int, scoreAdj int) error {
 			log.Warningf("Process (%d) not found setting oom_score_adj", pid)
 			return nil
 		}
-		return err
+		// If the pid is recycled during that race, we might
+		// get EPERM. It's reasonably safe to ignore the
+		// oom_score_adj error if we belive the process already exited.
+		log.Warningf("Failed to set oom_score_adj for process (%d): %v", pid, err)
+		return nil
 	}
 	defer f.Close()
 	if _, err := f.WriteString(strconv.Itoa(scoreAdj)); err != nil {
