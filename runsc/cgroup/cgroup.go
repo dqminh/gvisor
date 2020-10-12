@@ -244,11 +244,27 @@ func New(spec *specs.Spec) (*Cgroup, error) {
 		return nil, nil
 	}
 	var parents map[string]string
+	var initPaths map[string]string
 	if !filepath.IsAbs(spec.Linux.CgroupsPath) {
 		var err error
+		// check for nested cgroups, in /proc/self/cgroup we
+		// see paths from host, which don't exist in container.
+		initPaths, err = LoadPaths("1")
+		if err != nil {
+			return nil, fmt.Errorf("finding init cgroups: %v", err)
+		}
 		parents, err = LoadPaths("self")
 		if err != nil {
 			return nil, fmt.Errorf("finding current cgroups: %w", err)
+		}
+		for ctrlr, path := range parents {
+			if p, ok := initPaths[ctrlr]; ok {
+				relPath, err := filepath.Rel(p, path)
+				if err != nil {
+					return nil, err
+				}
+				parents[ctrlr] = relPath
+			}
 		}
 	}
 	return &Cgroup{
