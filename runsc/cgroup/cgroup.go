@@ -225,6 +225,39 @@ func loadPathsHelper(cgroup io.Reader) (map[string]string, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+
+	// For nested containers, in /proc/self/cgroup we see paths from host,
+	// which don't exist in container, so recover the container paths here by
+	// double-checking with /proc/pid/mountinfo
+	mountinfo, err := os.Open(filepath.Join("/proc", pid, "mountinfo"))
+	if err != nil {
+		return nil, err
+	}
+	defer mountinfo.Close()
+
+	mfScanner := bufio.NewScanner(mountinfo)
+	for mfScanner.Scan() {
+		txt := mfScanner.Text()
+		fields := strings.Fields(txt)
+		if len(fields) < 9 || fields[len(fields)-3] != "cgroup" {
+			continue
+		}
+		for _, opt := range strings.Split(fields[len(fields)-1], ",") {
+			// we have a subsystem here
+			if cgroupPath, ok := paths[opt]; ok {
+				root := fields[3]
+				relCgroupPath, err := filepath.Rel(root, cgroupPath)
+				if err != nil {
+					return nil, err
+				}
+				paths[opt] = relCgroupPath
+			}
+		}
+	}
+	if err := mfScanner.Err(); err != nil {
+		return nil, err
+	}
+
 	return paths, nil
 }
 
@@ -244,27 +277,11 @@ func New(spec *specs.Spec) (*Cgroup, error) {
 		return nil, nil
 	}
 	var parents map[string]string
-	var initPaths map[string]string
 	if !filepath.IsAbs(spec.Linux.CgroupsPath) {
 		var err error
-		// check for nested cgroups, in /proc/self/cgroup we
-		// see paths from host, which don't exist in container.
-		initPaths, err = LoadPaths("1")
-		if err != nil {
-			return nil, fmt.Errorf("finding init cgroups: %v", err)
-		}
 		parents, err = LoadPaths("self")
 		if err != nil {
 			return nil, fmt.Errorf("finding current cgroups: %w", err)
-		}
-		for ctrlr, path := range parents {
-			if p, ok := initPaths[ctrlr]; ok {
-				relPath, err := filepath.Rel(p, path)
-				if err != nil {
-					return nil, err
-				}
-				parents[ctrlr] = relPath
-			}
 		}
 	}
 	return &Cgroup{
