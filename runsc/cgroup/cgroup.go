@@ -236,6 +236,7 @@ func loadPathsHelper(cgroup io.Reader) (map[string]string, error) {
 	defer mountinfo.Close()
 
 	mfScanner := bufio.NewScanner(mountinfo)
+	optSeen := make(map[string]struct{})
 	for mfScanner.Scan() {
 		txt := mfScanner.Text()
 		fields := strings.Fields(txt)
@@ -243,14 +244,16 @@ func loadPathsHelper(cgroup io.Reader) (map[string]string, error) {
 			continue
 		}
 		for _, opt := range strings.Split(fields[len(fields)-1], ",") {
+			_, seen := optSeen[opt]
 			// we have a subsystem here
-			if cgroupPath, ok := paths[opt]; ok {
+			if cgroupPath, ok := paths[opt]; ok && !seen {
 				root := fields[3]
 				relCgroupPath, err := filepath.Rel(root, cgroupPath)
 				if err != nil {
 					return nil, err
 				}
 				paths[opt] = relCgroupPath
+				optSeen[opt] = struct{}{}
 			}
 		}
 	}
