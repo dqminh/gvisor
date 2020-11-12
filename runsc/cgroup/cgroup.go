@@ -199,10 +199,10 @@ func LoadPaths(pid string) (map[string]string, error) {
 	}
 	defer f.Close()
 
-	return loadPathsHelper(f)
+	return loadPathsHelper(f, pid)
 }
 
-func loadPathsHelper(cgroup io.Reader) (map[string]string, error) {
+func loadPathsHelper(cgroup io.Reader, pid string) (map[string]string, error) {
 	paths := make(map[string]string)
 
 	scanner := bufio.NewScanner(cgroup)

@@ -703,7 +703,7 @@ func TestLoadPaths(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := strings.NewReader(tc.cgroups)
-			got, err := loadPathsHelper(r)
+			got, err := loadPathsHelper(r, "self")
 			if len(tc.err) == 0 {
 				if err != nil {
 					t.Fatalf("Unexpected error: %v", err)
