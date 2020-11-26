@@ -62,7 +62,7 @@ func futexWaitAbsolute(t *kernel.Task, clockRealtime bool, ts linux.Timespec, fo
 		err = t.Block(w.C)
 	} else if clockRealtime {
 		notifier, tchan := ktime.NewChannelNotifier()
-		timer := ktime.NewTimer(t.Kernel().RealtimeClock(), notifier)
+		timer := t.Kernel().AddNamedTimer(t.Kernel().RealtimeClock(), notifier)
 		timer.Swap(ktime.Setting{
 			Enabled: true,
 			Next:    ktime.FromTimespec(ts),
@@ -139,7 +139,7 @@ func futexLockPI(t *kernel.Task, ts linux.Timespec, forever bool, addr usermem.A
 		err = t.Block(w.C)
 	} else {
 		notifier, tchan := ktime.NewChannelNotifier()
-		timer := ktime.NewTimer(t.Kernel().RealtimeClock(), notifier)
+		timer := t.Kernel().AddNamedTimer(t.Kernel().RealtimeClock(), notifier)
 		timer.Swap(ktime.Setting{
 			Enabled: true,
 			Next:    ktime.FromTimespec(ts),

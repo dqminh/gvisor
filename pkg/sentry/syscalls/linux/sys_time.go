@@ -196,7 +196,7 @@ func (n *clockNanosleepRestartBlock) Restart(t *kernel.Task) (uintptr, error) {
 // arguments.
 func clockNanosleepUntil(t *kernel.Task, c ktime.Clock, ts linux.Timespec) error {
 	notifier, tchan := ktime.NewChannelNotifier()
-	timer := ktime.NewTimer(c, notifier)
+	timer := t.Kernel().AddNamedTimer(c, notifier)
 
 	// Turn on the timer.
 	timer.Swap(ktime.Setting{

@@ -45,11 +45,16 @@ http_archive(
     ],
 )
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
+load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies", "go_local_sdk")
 
 go_rules_dependencies()
 
-go_register_toolchains(go_version = "1.14.2")
+go_local_sdk(
+  name = "go_sdk",
+  path = "/home/dqminh/workspace/go",
+)
+
+go_register_toolchains()
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 

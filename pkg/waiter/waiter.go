@@ -147,6 +147,19 @@ func (c *channelCallback) Callback(*Entry) {
 	}
 }
 
+type namedChannelCallback struct {
+	id uint64
+	ch chan uint64
+}
+
+// Callback implements EntryCallback.Callback.
+func (c *namedChannelCallback) Callback(*Entry) {
+	select {
+	case c.ch <- c.id:
+	default:
+	}
+}
+
 // NewChannelEntry initializes a new Entry that does a non-blocking write to a
 // struct{} channel when the callback is called. It returns the new Entry
 // instance and the channel being used.
@@ -159,6 +172,10 @@ func NewChannelEntry(c chan struct{}) (Entry, chan struct{}) {
 	}
 
 	return Entry{Callback: &channelCallback{ch: c}}, c
+}
+
+func NewNamedChannelEntry(id uint64, c chan uint64) Entry {
+	return Entry{Callback: &namedChannelCallback{id: id, ch: c}}
 }
 
 // Queue represents the wait queue where waiters can be added and

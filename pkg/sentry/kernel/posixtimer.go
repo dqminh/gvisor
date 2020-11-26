@@ -227,7 +227,7 @@ func (t *Task) IntervalTimerCreate(c ktime.Clock, sigev *linux.Sigevent) (linux.
 			return 0, syserror.EINVAL
 		}
 	}
-	it.timer = ktime.NewTimer(c, it)
+	it.timer = t.Kernel().AddNamedTimer(c, it)
 
 	t.tg.timers[id] = it
 	return id, nil

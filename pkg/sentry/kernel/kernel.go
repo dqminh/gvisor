@@ -149,6 +149,14 @@ type Kernel struct {
 	// monotonicClock is a ktime.Clock based on timekeeper's Monotonic.
 	monotonicClock *timekeeperClock
 
+	// timeMu synchronizes modification on the time map
+	timeMu  sync.Mutex              `state:"nosave"`
+	timeMap map[uint64]*ktime.Timer `state:"nosave"`
+
+	// channel to receive the time notification
+	tickChan chan uint64         `state:"nosave"`
+	timeChan chan time.NamedTime `state:"nosave"`
+
 	// syslog is the kernel log.
 	syslog syslog
 
@@ -381,6 +389,12 @@ func (k *Kernel) Init(args InitKernelArgs) error {
 	k.futexes = futex.NewManager()
 	k.netlinkPorts = port.New()
 
+	k.timeChan = make(chan time.NamedTime, 1024)
+	k.tickChan = make(chan uint64, 1024)
+	k.timeMap = make(map[uint64]*ktime.Timer)
+
+	go k.runTimerTick()
+
 	if VFS2Enabled {
 		ctx := k.SupervisorContext()
 		if err := k.vfs.Init(ctx); err != nil {
@@ -425,6 +439,34 @@ func (k *Kernel) Init(args InitKernelArgs) error {
 	}
 
 	return nil
+}
+
+func (k *Kernel) tickTimer(id uint64) {
+	k.timeMu.Lock()
+	timer, ok := k.timeMap[id]
+	k.timeMu.Unlock()
+	if ok {
+		timer.Tick()
+	}
+}
+
+func (k *Kernel) runTimerTick() {
+	for {
+		select {
+		case t := <-k.timeChan:
+			k.tickTimer(t.ID)
+		case id := <-k.tickChan:
+			k.tickTimer(id)
+		}
+	}
+}
+
+func (k *Kernel) AddNamedTimer(c ktime.Clock, listener ktime.TimerListener) *ktime.Timer {
+	t := ktime.NewNamedTimer(c, listener, k.timeChan, k.tickChan)
+	k.timeMu.Lock()
+	k.timeMap[t.ID] = t
+	k.timeMu.Unlock()
+	return t
 }
 
 // SaveTo saves the state of k to w.

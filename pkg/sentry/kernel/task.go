@@ -579,6 +579,9 @@ type Task struct {
 	//
 	// kcov is exclusive to the task goroutine.
 	kcov *Kcov
+
+	// timer chan maps our named timer to the corresponding notification channel
+	timerChan map[uint64]chan struct{}
 }
 
 func (t *Task) savePtraceTracer() *Task {

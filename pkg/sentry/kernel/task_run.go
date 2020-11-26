@@ -61,7 +61,7 @@ func (t *Task) run(threadID uintptr) {
 	// reconstruct t.blockingTimer during restore in Task.afterLoad(), because
 	// kernel.timekeeper.SetClocks() hasn't been called yet.
 	blockingTimerNotifier, blockingTimerChan := ktime.NewChannelNotifier()
-	t.blockingTimer = ktime.NewTimer(t.k.MonotonicClock(), blockingTimerNotifier)
+	t.blockingTimer = t.k.AddNamedTimer(t.k.MonotonicClock(), blockingTimerNotifier)
 	defer t.blockingTimer.Destroy()
 	t.blockingTimerChan = blockingTimerChan
 

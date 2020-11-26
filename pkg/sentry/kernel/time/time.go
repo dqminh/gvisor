@@ -19,6 +19,7 @@ package time
 import (
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"gvisor.dev/gvisor/pkg/abi/linux"
@@ -440,6 +441,12 @@ type Timer struct {
 	// event. It is also closed by Timer.Destroy to instruct the Timer
 	// goroutine to exit.
 	events chan struct{} `state:"nosave"`
+
+	// for NamedTimer
+	ID          uint64
+	namedKicker *time.NamedTimer    `state:"nosave"`
+	tc          chan time.NamedTime `state:"nosave"`
+	ec          chan uint64         `state:"nosave"`
 }
 
 // timerTickEvents are Clock events that require the Timer goroutine to Tick
@@ -483,15 +490,25 @@ func After(clock Clock, duration time.Duration) (*Timer, Time, <-chan struct{}) 
 // Preconditions: t.mu must be locked, or the caller must have exclusive access
 // to t.
 func (t *Timer) init() {
-	if t.kicker != nil {
-		return
+	// not named timer
+	if t.ID == 0 {
+		if t.kicker != nil {
+			return
+		}
+		// If t.kicker is nil, the Timer goroutine can't be running, so we can't
+		// race with it.
+		t.kicker = time.NewTimer(0)
+		t.entry, t.events = waiter.NewChannelEntry(nil)
+		t.clock.EventRegister(&t.entry, timerTickEvents)
+		go t.runGoroutine() // S/R-SAFE: synchronized by t.mu
+	} else {
+		if t.namedKicker != nil {
+			return
+		}
+		t.namedKicker = time.NewNamedTimer(0, t.tc, t.ID)
+		t.entry = waiter.NewNamedChannelEntry(t.ID, t.ec)
+		t.clock.EventRegister(&t.entry, timerTickEvents)
 	}
-	// If t.kicker is nil, the Timer goroutine can't be running, so we can't
-	// race with it.
-	t.kicker = time.NewTimer(0)
-	t.entry, t.events = waiter.NewChannelEntry(nil)
-	t.clock.EventRegister(&t.entry, timerTickEvents)
-	go t.runGoroutine() // S/R-SAFE: synchronized by t.mu
 }
 
 // Destroy releases resources owned by the Timer. A Destroyed Timer must not be
@@ -502,11 +519,18 @@ func (t *Timer) Destroy() {
 	t.mu.Lock()
 	t.setting.Enabled = false
 	t.mu.Unlock()
-	t.kicker.Stop()
+	if t.kicker != nil {
+		t.kicker.Stop()
+	}
+	if t.namedKicker != nil {
+		t.namedKicker.Stop()
+	}
 	// Unregister t.entry, ensuring that the Clock will not send to t.events,
 	// before closing t.events to instruct the Timer goroutine to exit.
 	t.clock.EventUnregister(&t.entry)
-	close(t.events)
+	if t.events != nil {
+		close(t.events)
+	}
 	t.listener.Destroy()
 }
 
@@ -554,6 +578,9 @@ func (t *Timer) Pause() {
 	if t.kicker != nil {
 		t.kicker.Stop()
 	}
+	if t.namedKicker != nil {
+		t.namedKicker.Stop()
+	}
 }
 
 // Resume ends the effect of Pause. If the Timer is not paused, Resume has no
@@ -575,7 +602,12 @@ func (t *Timer) Resume() {
 
 	// Kick the Timer goroutine in case it was already initialized, but the
 	// Timer goroutine was sleeping.
-	t.kicker.Reset(0)
+	if t.kicker != nil {
+		t.kicker.Reset(0)
+	}
+	if t.namedKicker != nil {
+		t.namedKicker.Reset(0)
+	}
 }
 
 // Get returns a snapshot of the Timer's current Setting and the time
@@ -663,7 +695,12 @@ func (t *Timer) resetKickerLocked(now Time) {
 	if t.setting.Enabled {
 		// Clock.WallTimeUntil may return a negative value. This is fine;
 		// time.when treats negative Durations as 0.
-		t.kicker.Reset(t.clock.WallTimeUntil(t.setting.Next, now))
+		if t.kicker != nil {
+			t.kicker.Reset(t.clock.WallTimeUntil(t.setting.Next, now))
+		}
+		if t.namedKicker != nil {
+			t.namedKicker.Reset(t.clock.WallTimeUntil(t.setting.Next, now))
+		}
 	}
 	// We don't call t.kicker.Stop if !t.setting.Enabled because in most cases
 	// resetKickerLocked will be called from the Timer goroutine itself, in
@@ -708,4 +745,24 @@ func (c *ChannelNotifier) Notify(uint64, Setting) (Setting, bool) {
 // Destroy implements ktime.TimerListener.Destroy and will close the channel.
 func (c *ChannelNotifier) Destroy() {
 	close(c.tchan)
+}
+
+var (
+	// atomically increasing timer id
+	timerID uint64 = 1
+)
+
+// NamedTimer doesn't handle ticking of time, the caller needs to listen
+// to timeC and eventsC to call Tick themselves
+func NewNamedTimer(clock Clock, listener TimerListener, timeC chan time.NamedTime, eventsC chan uint64) *Timer {
+	id := atomic.AddUint64(&timerID, 1)
+	t := &Timer{
+		clock:    clock,
+		listener: listener,
+		ID:       id,
+		tc:       timeC,
+		ec:       eventsC,
+	}
+	t.init()
+	return t
 }
